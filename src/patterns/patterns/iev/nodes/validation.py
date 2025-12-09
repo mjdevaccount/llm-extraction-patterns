@@ -14,7 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from langchain_core.messages import HumanMessage
 
-from .base_nodes import BaseNode, NodeExecutionError, NodeStatus
+from .base_node import BaseNode, NodeExecutionError, NodeStatus
 from ..abstractions import ILLMProvider
 from ..strategies import (
     StrictValidationStrategy,
@@ -22,6 +22,7 @@ from ..strategies import (
     BestEffortValidationStrategy,
 )
 from ..llm_adapter import LangChainLLMAdapter
+from .llm_adapter import invoke_llm, is_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +122,9 @@ class ValidationNode(BaseNode):
             validation_rules: Dict of {rule_name: rule_func}
                 where rule_func(data) returns True if valid, raises/returns False otherwise
             mode: ValidationMode enum (STRICT, RETRY, BEST_EFFORT)
-            llm: Optional LangChain ChatModel for RETRY mode repair loop
+            llm: Optional LLMClient (cloud) or LangChain ChatModel (local/brittle) for RETRY mode repair loop
                 Required if mode=ValidationMode.RETRY
+                Note: RETRY mode works best with LangChain ChatModel for local/brittle LLMs
             max_retries: Maximum retry attempts for RETRY mode (default: 2)
             name: Node identifier
             description: Human-readable description
@@ -155,7 +157,12 @@ class ValidationNode(BaseNode):
             self.mode = ValidationMode.STRICT
         
         # SOLID Refactoring: Initialize validation strategy
-        llm_adapter = LangChainLLMAdapter(llm) if llm else None
+        # Only create adapter if not LLMClient (for local/brittle LLMs)
+        if llm and not is_llm_client(llm):
+            llm_adapter = LangChainLLMAdapter(llm)
+        else:
+            llm_adapter = None
+        
         strategy_map = {
             ValidationMode.STRICT: StrictValidationStrategy(),
             ValidationMode.RETRY: RetryValidationStrategy(llm_adapter) if llm_adapter else StrictValidationStrategy(),
@@ -231,7 +238,8 @@ class ValidationNode(BaseNode):
             validation_error = None
             
             # SOLID Refactoring: Use strategy pattern
-            llm_adapter = LangChainLLMAdapter(self.llm) if self.llm else None
+            # Adapter already created in __init__, just pass it
+            llm_adapter = LangChainLLMAdapter(self.llm) if (self.llm and not is_llm_client(self.llm)) else None
             result = await self._validation_strategy.validate(
                 data=data,
                 schema=self.output_schema,

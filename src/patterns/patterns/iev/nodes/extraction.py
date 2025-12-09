@@ -11,7 +11,7 @@ from datetime import datetime
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 
-from .base_nodes import BaseNode, NodeExecutionError, NodeStatus
+from .base_node import BaseNode, NodeExecutionError, NodeStatus
 from ..abstractions import ILLMProvider
 from ..strategies import (
     IncrementalRepairStrategy,
@@ -19,6 +19,7 @@ from ..strategies import (
     RegexRepairStrategy,
 )
 from ..llm_adapter import LangChainLLMAdapter
+from .llm_adapter import invoke_llm, is_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -77,11 +78,12 @@ class ExtractionNode(BaseNode):
         Initialize extraction node.
         
         Args:
-            llm: LangChain ChatModel (should have temperature=0.1)
+            llm: LLMClient (cloud) or LangChain ChatModel (local/brittle). Should have temperature=0.1.
             prompt_template: Template for extraction prompt
             output_schema: Pydantic BaseModel defining expected JSON structure
             json_repair_strategies: List of repair strategies to use
                 Options: ["incremental_repair", "llm_repair", "regex_fallback"]
+                Note: "llm_repair" only works with LangChain ChatModel (not LLMClient)
             name: Node identifier
             description: Human-readable description
         """
@@ -96,15 +98,20 @@ class ExtractionNode(BaseNode):
         ]
         
         # SOLID Refactoring: Initialize strategy objects
-        llm_adapter = LangChainLLMAdapter(llm)
+        # Only create adapter if not LLMClient (for local/brittle LLMs)
+        if not is_llm_client(llm):
+            llm_adapter = LangChainLLMAdapter(llm)
+        else:
+            llm_adapter = None  # LLMClient doesn't need adapter for strategies
+        
         strategy_map = {
             "incremental_repair": IncrementalRepairStrategy(),
-            "llm_repair": LLMRepairStrategy(llm_adapter),
+            "llm_repair": LLMRepairStrategy(llm_adapter) if llm_adapter else None,
             "regex_fallback": RegexRepairStrategy(),
         }
         self._repair_strategies = []
         for strategy_name in self.json_repair_strategies:
-            if strategy_name in strategy_map:
+            if strategy_name in strategy_map and strategy_map[strategy_name] is not None:
                 self._repair_strategies.append(strategy_map[strategy_name])
     
     async def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -154,9 +161,10 @@ class ExtractionNode(BaseNode):
             warnings = []
             data = None
             
-            # Try with_structured_output() first (December 2025 best practice)
+            # Try with_structured_output() first (for LangChain ChatModels only)
+            json_text = None
             try:
-                if hasattr(self.llm, 'with_structured_output'):
+                if not is_llm_client(self.llm) and hasattr(self.llm, 'with_structured_output'):
                     structured_llm = self.llm.with_structured_output(self.output_schema)
                     validated_model = await structured_llm.ainvoke(
                         [HumanMessage(content=prompt_text)]
@@ -171,11 +179,12 @@ class ExtractionNode(BaseNode):
                 # Fallback to manual parsing with repair strategies
                 logger.info(f"[{self.name}] Using manual parsing (with_structured_output not available: {e})")
                 
-                # Invoke LLM manually
-                response = await self.llm.ainvoke(
-                    [HumanMessage(content=prompt_text)]
+                # Invoke LLM manually (works with both LLMClient and LangChain)
+                json_text = await invoke_llm(
+                    self.llm, 
+                    [HumanMessage(content=prompt_text)],
+                    system="You are a helpful assistant that extracts structured data."
                 )
-                json_text = response.content
                 
                 # Strategy 1: Direct parse
                 try:

@@ -15,7 +15,7 @@ from datetime import datetime
 
 from langgraph.graph import StateGraph, START, END
 
-from ..nodes.base_nodes import (
+from ..nodes.base_node import (
     BaseNode,
     NodeExecutionError,
     NodeStatus,
@@ -24,10 +24,6 @@ from ..nodes.base_nodes import (
 
 logger = logging.getLogger(__name__)
 
-
-# ============================================================================
-# Graph Builder (SRP: Builds graphs only)
-# ============================================================================
 
 class GraphBuilder:
     """
@@ -121,10 +117,6 @@ class GraphBuilder:
         logger.info(f"[{workflow_name}] Graph compiled successfully")
         return graph.compile()
 
-
-# ============================================================================
-# Workflow Executor (SRP: Executes workflows only)
-# ============================================================================
 
 class WorkflowExecutor:
     """
@@ -245,10 +237,6 @@ class WorkflowExecutor:
         return final_state
 
 
-# ============================================================================
-# Metrics Collector (SRP: Collects metrics only)
-# ============================================================================
-
 class MetricsCollector:
     """
     Single Responsibility: Collect and report execution metrics.
@@ -310,19 +298,13 @@ class MetricsCollector:
             "error_message": error,
         }
     
-    def get_metrics(self, node_name: Optional[str] = None) -> Dict[str, Any]:
+    def get_metrics(self) -> Dict[str, Any]:
         """
-        Get metrics for node(s).
-        
-        Args:
-            node_name: Specific node, or None for all nodes
+        Get metrics for all nodes.
         
         Returns:
-            Metrics dict
+            Metrics dict with workflow summary
         """
-        if node_name:
-            return self.metrics.get(node_name, {})
-        
         # Calculate total duration
         total_duration_ms = 0.0
         if self.start_time and self.end_time:
@@ -330,11 +312,28 @@ class MetricsCollector:
                 (self.end_time - self.start_time).total_seconds() * 1000
             )
         
+        # Determine overall status
+        statuses = [m.get("status") for m in self.metrics.values()]
+        if NodeStatus.FAILED.value in statuses:
+            overall_status = "failed"
+        elif NodeStatus.SUCCESS.value in statuses:
+            overall_status = "success"
+        else:
+            overall_status = "unknown"
+        
+        # Collect all warnings
+        all_warnings = []
+        for metrics in self.metrics.values():
+            all_warnings.extend(metrics.get("warnings", []))
+        
         return {
             "workflow_name": self.workflow_name,
+            "overall_status": overall_status,
             "total_duration_ms": total_duration_ms,
-            "node_count": len(self.metrics),
+            "nodes_executed": len(self.metrics),
+            "total_warnings": len(all_warnings),
             "nodes": self.metrics,
+            "warnings": all_warnings,
         }
     
     def get_summary(self) -> Dict[str, Any]:

@@ -9,7 +9,8 @@ from datetime import datetime
 
 from langchain_core.messages import HumanMessage
 
-from .base_nodes import BaseNode, NodeExecutionError, NodeStatus
+from .base_node import BaseNode, NodeExecutionError, NodeStatus
+from ..llm_adapter import invoke_llm
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class IntelligenceNode(BaseNode):
         Initialize intelligence node.
         
         Args:
-            llm: LangChain ChatModel (should have high temperature)
+            llm: LLMClient (cloud) or LangChain ChatModel (local/brittle). Should have high temperature.
             prompt_template: Template with {key} placeholders for state values
             required_state_keys: Keys that must exist in state
             name: Node identifier
@@ -67,6 +68,7 @@ class IntelligenceNode(BaseNode):
         
         Note:
             LLM should be configured with temperature=0.7-0.8 for creative reasoning.
+            Works with both LLMClient (simple cloud APIs) and LangChain ChatModel (local/brittle LLMs).
         """
         super().__init__(name=name, description=description)
         self.llm = llm
@@ -114,15 +116,21 @@ class IntelligenceNode(BaseNode):
             
             logger.info(f"[{self.name}] Invoking LLM for reasoning")
             
-            # Invoke LLM (get existing messages or start fresh)
+            # Invoke LLM (works with both LLMClient and LangChain ChatModel)
             messages = state.get("messages", [])
             messages.append(HumanMessage(content=prompt_text))
             
-            response = await self.llm.ainvoke(messages)
+            response_text = await invoke_llm(self.llm, messages, system="You are a helpful assistant that analyzes information.")
             
             # Store results
-            state["analysis"] = response.content
-            state["messages"] = messages + [response]
+            state["analysis"] = response_text
+            # Update messages if using LangChain-style LLM
+            if hasattr(self.llm, 'ainvoke'):
+                from langchain_core.messages import AIMessage
+                response = AIMessage(content=response_text)
+                state["messages"] = messages + [response]
+            else:
+                state["messages"] = messages
             
             # Update metrics
             self.metrics.output_keys = ["analysis", "messages"]

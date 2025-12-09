@@ -1,5 +1,5 @@
 """
-Workflow Orchestrator
+Workflow Orchestrator - SOLID Design
 
 Compose BaseNode instances into LangGraph workflows.
 
@@ -32,22 +32,18 @@ Example:
     print(workflow.get_metrics())
 """
 
-import asyncio
 import logging
-from typing import (
-    Any, Dict, List, Optional, Type, TypedDict, Tuple
-)
+from typing import Any, Dict, List, Optional, Type, TypedDict, Tuple
 from datetime import datetime
 
 from langgraph.graph import StateGraph, START, END
 
-from ..nodes.base_nodes import (
+from ..nodes.base_node import (
     BaseNode,
     NodeExecutionError,
     NodeStatus,
 )
 
-# SOLID Refactoring: Import separated components
 from .workflow_components import (
     GraphBuilder,
     WorkflowExecutor,
@@ -168,7 +164,7 @@ class Workflow:
                     f"Available: {node_names}"
                 )
         
-        # SOLID Refactoring: Initialize separated components
+        # SOLID: Initialize separated components
         self._graph_builder = GraphBuilder(
             state_schema=state_schema,
             nodes=self.nodes,
@@ -182,26 +178,6 @@ class Workflow:
         
         # Build graph (lazy - only when needed)
         self._graph = None
-        self._start_time = None
-        self._metrics = {}
-    
-    def _compute_topology(self) -> None:
-        """
-        Compute workflow topology (first/last nodes, execution order).
-        """
-        # Build adjacency list
-        incoming = {name: set() for name in self.nodes.keys()}
-        for from_node, to_node in self.edges:
-            incoming[to_node].add(from_node)
-        
-        # Find first nodes (no incoming edges)
-        self.first_nodes = [name for name, deps in incoming.items() if not deps]
-        
-        # Find last nodes (from end of edges list)
-        if self.edges:
-            self.last_node = self.edges[-1][1]
-        else:
-            self.last_node = self.first_nodes[0] if self.first_nodes else None
     
     def _build_graph(self) -> StateGraph:
         """
@@ -212,92 +188,10 @@ class Workflow:
         Returns:
             Compiled LangGraph workflow
         """
-        # SOLID Refactoring: Use GraphBuilder
         return self._graph_builder.build(
             node_wrapper_factory=self._executor.create_node_wrapper,
             workflow_name=self.name,
         )
-        logger.info(
-            f"[{self.name}] Building LangGraph with {len(self.nodes)} nodes"
-        )
-        
-        graph = StateGraph(self.state_schema)
-        
-        # Add nodes (wrap to handle async + metrics)
-        for node_name, node in self.nodes.items():
-            graph.add_node(
-                node_name,
-                self._make_node_wrapper(node)
-            )
-        
-        # Add edges
-        # START -> first nodes
-        for first_node in self.first_nodes:
-            graph.add_edge(START, first_node)
-        
-        # Interior edges
-        for from_node, to_node in self.edges:
-            graph.add_edge(from_node, to_node)
-        
-        # Last node -> END
-        if self.last_node:
-            graph.add_edge(self.last_node, END)
-        
-        logger.info(f"[{self.name}] Graph compiled successfully")
-        return graph.compile()
-    
-    def _make_node_wrapper(self, node: BaseNode) -> Any:
-        """
-        Wrap node execution to handle:
-        - Input validation
-        - Async/sync conversion
-        - Error handling
-        - Metrics collection
-        """
-        async def wrapper(state: Dict[str, Any]) -> Dict[str, Any]:
-            logger.info(f"[{self.name}] Executing {node.name}")
-            
-            try:
-                # Validate input
-                if not node.validate_input(state):
-                    missing = [
-                        k for k in state.keys() 
-                        if k not in state
-                    ]
-                    raise NodeExecutionError(
-                        node_name=node.name,
-                        reason=f"Input validation failed",
-                        state=state
-                    )
-                
-                # Execute
-                state = await node.execute(state)
-                
-                # Metrics collected by MetricsCollector
-                
-                logger.info(
-                    f"[{self.name}] {node.name} succeeded "
-                    f"({node.metrics.duration_ms:.1f}ms)"
-                )
-                
-                return state
-            
-            except Exception as e:
-                logger.error(
-                    f"[{self.name}] {node.name} failed: {e}"
-                )
-                
-                # Wrap in WorkflowExecutionError
-                metrics = node.get_metrics()
-                raise WorkflowExecutionError(
-                    workflow_name=self.name,
-                    failed_node=node.name,
-                    reason=str(e),
-                    state_at_failure=state,
-                    metrics=metrics.to_dict() if hasattr(metrics, 'to_dict') else metrics,
-                )
-        
-        return wrapper
     
     @property
     def graph(self) -> StateGraph:
@@ -334,19 +228,13 @@ class Workflow:
             print(result["analysis"])
             print(result["validated"])
         """
-        # SOLID Refactoring: Use MetricsCollector if available
-        if SOLID_COMPONENTS_AVAILABLE:
-            self._metrics_collector.start_execution()
-        else:
-            self._start_time = datetime.now()
-            self._metrics = {}
+        self._metrics_collector.start_execution()
         
         logger.info(
             f"[{self.name}] Starting workflow execution"
         )
         
         try:
-            # SOLID Refactoring: Use WorkflowExecutor
             final_state = await self._executor.execute(
                 graph=self.graph,
                 initial_state=initial_state,
@@ -424,7 +312,7 @@ class Workflow:
             lines.append(f"  [{from_node}]")
         
         # Last node
-        if self.last_node:
+        if self._graph_builder.last_node:
             lines.append("    |")
             lines.append("    v")
             lines.append("  END")
@@ -454,35 +342,7 @@ class Workflow:
                 }
             }
         """
-        # SOLID Refactoring: Use MetricsCollector
         return self._metrics_collector.get_metrics()
-        total_duration = 0.0
-        all_warnings = []
-        
-        node_metrics = {}
-        for node_name, metrics in self._metrics.items():
-            node_metrics[node_name] = metrics
-            total_duration += metrics.get("duration_ms", 0)
-            all_warnings.extend(metrics.get("warnings", []))
-        
-        # Determine overall status
-        statuses = [m.get("status") for m in self._metrics.values()]
-        if NodeStatus.FAILED.value in statuses:
-            overall_status = "failed"
-        elif NodeStatus.SUCCESS.value in statuses:
-            overall_status = "success"
-        else:
-            overall_status = "unknown"
-        
-        return {
-            "workflow_name": self.name,
-            "overall_status": overall_status,
-            "total_duration_ms": total_duration,
-            "nodes_executed": len(self._metrics),
-            "total_warnings": len(all_warnings),
-            "nodes": node_metrics,
-            "warnings": all_warnings,
-        }
     
     def __repr__(self) -> str:
         return (
@@ -493,3 +353,4 @@ class Workflow:
     
     def __str__(self) -> str:
         return self.visualize()
+
