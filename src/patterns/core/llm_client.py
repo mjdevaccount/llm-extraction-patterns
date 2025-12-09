@@ -148,10 +148,21 @@ class OllamaClient(LLMClient):
         **kwargs,
     ) -> str:
         """Call local Ollama."""
+        # Ollama uses 'options' dict for parameters
+        options = {}
+        if temperature is not None:
+            options["temperature"] = temperature
+        if max_tokens is not None:
+            options["num_predict"] = max_tokens
+        
+        # Merge any additional options from kwargs
+        if "options" in kwargs:
+            options.update(kwargs.pop("options"))
+        
         response = self.client.generate(
             model=self.model,
             prompt=f"{system}\n\nUser: {user}",
-            temperature=temperature,
+            options=options if options else None,
             stream=False,
             **kwargs,
         )

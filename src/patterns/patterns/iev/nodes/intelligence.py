@@ -138,7 +138,7 @@ class IntelligenceNode(BaseNode):
             
             logger.info(
                 f"[{self.name}] Analysis complete "
-                f"({len(response.content)} chars)"
+                f"({len(response_text)} chars)"
             )
             
             return state
