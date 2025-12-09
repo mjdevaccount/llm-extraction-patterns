@@ -17,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from ...core.llm_client import LLMClient
 from .abstractions import IValidationStrategy
+from .retry_strategies import IRetryStrategy, CompositeRetryStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class IEVState(TypedDict):
     verification_status: Literal["PENDING", "APPROVED", "REJECTED"]
     error: str
     metrics: Dict[str, Any]  # Track execution metrics
+    extraction_attempts: int  # Track retry count
 
 
 class MetricsCollector:
@@ -70,9 +72,11 @@ def create_iev_graph(
     extraction_prompt: str,
     verification_prompt: str,
     validation_strategy: Optional[IValidationStrategy] = None,
+    retry_strategy: Optional[IRetryStrategy] = None,
+    max_extraction_retries: int = 4,
 ):
     """
-    Create IEV pattern graph.
+    Create IEV pattern graph with retry logic.
 
     Args:
         llm_client: LLM client instance
@@ -81,12 +85,18 @@ def create_iev_graph(
         extraction_prompt: Prompt template for extraction phase
         verification_prompt: Prompt template for verification phase
         validation_strategy: Optional strategy for sophisticated validation (SOLID pattern)
+        retry_strategy: Optional retry strategy for failed extractions (default: CompositeRetryStrategy)
+        max_extraction_retries: Maximum extraction retry attempts
 
     Returns:
         Configured LangGraph StateGraph (if langgraph installed) or simple executor
     """
     
     metrics = MetricsCollector()
+    
+    # Use composite strategy by default
+    if retry_strategy is None:
+        retry_strategy = CompositeRetryStrategy()
     
     if StateGraph is None:
         # Fallback: return a simple executor function
@@ -98,6 +108,7 @@ def create_iev_graph(
                 "input": input_text,
                 "verification_status": "PENDING",
                 "metrics": {},
+                "extraction_attempts": 0,
             }
             state = await intelligence_node(state)
             state = await extraction_node(state)
@@ -137,54 +148,102 @@ def create_iev_graph(
             return {"error": str(e)}
 
     async def extraction_node(state: IEVState) -> Dict[str, Any]:
-        """Extraction phase: Extract structured data with repair strategies."""
+        """Extraction phase: Extract structured data with retry logic."""
         logger.info("[IEV] Extraction phase")
         start_time = time.time()
+        attempt = 0
+        
         try:
             if "error" in state and state["error"]:
                 return {"error": state["error"]}
 
             analysis = state.get("analysis", "")
-            prompt = extraction_prompt.format(analysis=analysis)
+            base_prompt = extraction_prompt.format(analysis=analysis)
 
             # Add schema to prompt
             schema_json = output_schema.model_json_schema()
-            prompt += f"\n\nExtract data matching this schema (return valid JSON only):\n{json.dumps(schema_json, indent=2)}"
+            base_prompt += f"\n\nExtract data matching this schema (return valid JSON only):\n{json.dumps(schema_json, indent=2)}"
 
-            # LLMClient.generate() is sync, wrap in async; LangChain has ainvoke()
-            import asyncio
-            if hasattr(llm_client, 'generate'):
-                response_text = await asyncio.to_thread(
-                    llm_client.generate,
-                    system="You are a helpful assistant that extracts structured data.",
-                    user=prompt,
-                )
-            else:
-                # LangChain ChatModel
-                from langchain_core.messages import HumanMessage
-                response = await llm_client.ainvoke([HumanMessage(content=prompt)])
-                response_text = response.content if hasattr(response, 'content') else str(response)
+            # Try extraction with retries
+            for attempt in range(max_extraction_retries):
+                logger.info(f"[IEV] Extraction attempt {attempt + 1}/{max_extraction_retries}")
+                
+                try:
+                    # LLMClient.generate() is sync, wrap in async; LangChain has ainvoke()
+                    import asyncio
+                    if hasattr(llm_client, 'generate'):
+                        response_text = await asyncio.to_thread(
+                            llm_client.generate,
+                            system="You are a helpful assistant that extracts structured data.",
+                            user=base_prompt,
+                        )
+                    else:
+                        # LangChain ChatModel
+                        from langchain_core.messages import HumanMessage
+                        response = await llm_client.ainvoke([HumanMessage(content=base_prompt)])
+                        response_text = response.content if hasattr(response, 'content') else str(response)
 
-            # Extract and repair JSON
-            json_text = _extract_json(response_text)
-            json_data = _repair_json(json_text)
+                    # Extract and repair JSON
+                    json_text = _extract_json(response_text)
+                    json_data = _repair_json(json_text)
 
-            # Parse with Pydantic
-            parsed = output_schema.model_validate(json_data)
-
-            duration = (time.time() - start_time) * 1000
-            metrics.record("extraction", duration, "success", {"schema": output_schema.__name__})
-            return {"extracted": parsed}
-        except ValidationError as e:
-            duration = (time.time() - start_time) * 1000
-            metrics.record("extraction", duration, "error", {"error": f"Validation: {e}"})
-            logger.exception(f"[IEV] Extraction validation error: {e}")
-            return {"error": f"Validation error: {e}"}
+                    # Parse with Pydantic
+                    parsed = output_schema.model_validate(json_data)
+                    
+                    duration = (time.time() - start_time) * 1000
+                    metrics.record("extraction", duration, "success", {
+                        "schema": output_schema.__name__,
+                        "attempts": attempt + 1,
+                    })
+                    return {"extracted": parsed, "extraction_attempts": attempt + 1}
+                
+                except (json.JSONDecodeError, ValidationError) as e:
+                    logger.warning(f"[IEV] Extraction attempt {attempt + 1} failed: {e}")
+                    
+                    # If we have more retries, try retry strategy
+                    if attempt < max_extraction_retries - 1:
+                        logger.info(f"[IEV] Using retry strategy: {retry_strategy.name}")
+                        retry_result = await retry_strategy.retry(
+                            llm=llm_client,
+                            original_prompt=base_prompt,
+                            failed_output=response_text,
+                            error_message=str(e),
+                            schema=output_schema,
+                            attempt_number=attempt + 1,
+                        )
+                        
+                        if retry_result is not None:
+                            logger.info(f"[IEV] Retry successful on attempt {attempt + 1}")
+                            parsed = output_schema.model_validate(retry_result)
+                            duration = (time.time() - start_time) * 1000
+                            metrics.record("extraction", duration, "success", {
+                                "schema": output_schema.__name__,
+                                "attempts": attempt + 2,  # +1 for initial, +1 for current
+                                "retry_strategy": retry_strategy.name,
+                            })
+                            return {"extracted": parsed, "extraction_attempts": attempt + 2}
+                    
+                    # Continue to next attempt or fail
+                    if attempt == max_extraction_retries - 1:
+                        # Last attempt failed
+                        duration = (time.time() - start_time) * 1000
+                        metrics.record("extraction", duration, "error", {
+                            "error": f"All {max_extraction_retries} extraction attempts failed",
+                            "last_error": str(e),
+                        })
+                        return {
+                            "error": f"Extraction failed after {max_extraction_retries} attempts: {e}",
+                            "extraction_attempts": attempt + 1,
+                        }
+            
+            # Should not reach here
+            raise RuntimeError("Extraction loop exited unexpectedly")
+        
         except Exception as e:
             duration = (time.time() - start_time) * 1000
             metrics.record("extraction", duration, "error", {"error": str(e)})
             logger.exception(f"[IEV] Extraction error: {e}")
-            return {"error": str(e)}
+            return {"error": str(e), "extraction_attempts": attempt + 1}
 
     async def verification_node(state: IEVState) -> Dict[str, Any]:
         """Verification phase: Verify extracted data using optional validation strategy."""
