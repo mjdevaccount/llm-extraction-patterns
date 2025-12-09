@@ -2,6 +2,18 @@
 
 A modular, learning-first repository for implementing and understanding five core LLM agent design patterns. Built with Python, LangGraph, and MCP integration.
 
+## 🎯 Implementation Status (December 2025)
+
+| Pattern | Status | Learning Value | Production Ready |
+|---------|--------|-----------------|------------------|
+| **IEV** (Intelligence-Extraction-Validation) | ✅ COMPLETE | ⭐⭐⭐ Best starting point | ⭐⭐⭐ High |
+| **Evaluator-Optimizer** (Draft-Critique-Refine) | 🚧 Basic | ⭐⭐⭐ Quality feedback loop | ⭐⭐ Medium |
+| **Orchestrator** (Task Delegation) | 🚧 Stub | ⭐⭐⭐ Complex workflows | ⭐ Foundation |
+| **Agentic RAG** (Retrieval-Verification) | 🚧 Stub | ⭐⭐ Research & fact-checking | ⭐ Foundation |
+| **System 2** (Thinking-Before-Acting) | 🚧 Stub | ⭐⭐⭐ Complex reasoning | ⭐ Foundation |
+
+**Legend:** ✅ = Fully implemented | 🚧 = Basic/stub implementation | ⭐ = Learning/production score
+
 ## Repository Structure
 
 ```
@@ -27,34 +39,42 @@ aistack-patterns/
 │       ├── patterns/           # ✅ THE 5 PATTERN IMPLEMENTATIONS
 │       │   ├── __init__.py
 │       │   │
-│       │   ├── iev/            # Pattern 1: Intelligence-Extraction-Validation
+│       │   ├── iev/            # Pattern 1: Intelligence-Extraction-Validation ✅
 │       │   │   ├── __init__.py
 │       │   │   ├── graph.py    # State machine definition
 │       │   │   ├── prompts.py  # Verification-specific prompts
-│       │   │   └── example.py  # Minimal working example
+│       │   │   ├── example.py  # Minimal working example
+│       │   │   ├── abstractions.py
+│       │   │   ├── nodes/      # Individual node implementations
+│       │   │   ├── strategies/ # JSON repair & validation strategies
+│       │   │   └── workflows/  # SOLID workflow orchestration
 │       │   │
-│       │   ├── evaluator_optimizer/  # Pattern 2: Draft-Critique-Refine
+│       │   ├── evaluator_optimizer/  # Pattern 2: Draft-Critique-Refine 🚧
 │       │   │   ├── __init__.py
 │       │   │   ├── graph.py
 │       │   │   ├── grader.py   # Scoring & feedback logic
+│       │   │   ├── prompts.py
 │       │   │   └── example.py
 │       │   │
-│       │   ├── orchestrator/        # Pattern 3: Orchestrator-Workers
+│       │   ├── orchestrator/        # Pattern 3: Orchestrator-Workers 🚧
 │       │   │   ├── __init__.py
 │       │   │   ├── orchestrator.py  # Router logic
 │       │   │   ├── workers.py       # Worker definitions
+│       │   │   ├── prompts.py
 │       │   │   └── example.py
 │       │   │
-│       │   ├── agentic_rag/         # Pattern 4: Iterative Retrieval-Verification
+│       │   ├── agentic_rag/         # Pattern 4: Iterative Retrieval-Verification 🚧
 │       │   │   ├── __init__.py
 │       │   │   ├── retriever.py     # Search logic
 │       │   │   ├── verifier.py      # Sufficiency checker
+│       │   │   ├── prompts.py
 │       │   │   └── example.py
 │       │   │
-│       │   └── system2/             # Pattern 5: Thinking-Before-Acting
+│       │   └── system2/             # Pattern 5: Thinking-Before-Acting 🚧
 │       │       ├── __init__.py
 │       │       ├── flow.py          # <thought> generation pipeline
 │       │       ├── parser.py        # Extract reasoning
+│       │       ├── prompts.py
 │       │       └── example.py
 │       │
 │       └── utils/             # ✅ LEARNING & DEBUGGING
@@ -97,13 +117,15 @@ Each pattern is independent and minimal. You can understand Pattern 1 (IEV) comp
 
 ### Step 1: Choose Your First Pattern
 
-Start with IEV (Intelligence-Extraction-Validation) because:
+Start with **IEV (Intelligence-Extraction-Validation)** because:
 
 ✅ Simplest mental model: Explore → Verify → Act
 
 ✅ Direct connection to safety (most intuitive)
 
 ✅ Only 3 nodes in the graph
+
+✅ Most complete implementation
 
 ### Step 2: Run the Minimal Example
 
@@ -128,16 +150,17 @@ Open `src/patterns/patterns/iev/example.py` and:
 - Change the verification prompt
 - Add a new tool call
 - See how the graph behaves
+- Experiment with different validation strategies
 
 ## Pattern Quick Reference
 
-| Pattern | File | Purpose | Complexity | When to Use |
-|---------|------|---------|------------|-------------|
-| IEV | `patterns/iev/` | Safety & Precision | ⭐ Easy | High-stakes actions |
-| Evaluator-Optimizer | `patterns/evaluator_optimizer/` | Quality Control | ⭐⭐ Medium | Content refinement |
-| Orchestrator | `patterns/orchestrator/` | Complex Tasks | ⭐⭐⭐ Medium | Multi-step projects |
-| Agentic RAG | `patterns/agentic_rag/` | Research & Lookup | ⭐⭐ Medium | Fact-heavy queries |
-| System 2 | `patterns/system2/` | Hard Logic | ⭐⭐⭐ Medium | Math/reasoning |
+| Pattern | File | Purpose | Complexity | When to Use | Status |
+|---------|------|---------|------------|-------------|--------|
+| IEV | `patterns/iev/` | Safety & Precision | ⭐ Easy | High-stakes actions | ✅ Ready |
+| Evaluator-Optimizer | `patterns/evaluator_optimizer/` | Quality Control | ⭐⭐ Medium | Content refinement | 🚧 Basic |
+| Orchestrator | `patterns/orchestrator/` | Complex Tasks | ⭐⭐⭐ Medium | Multi-step projects | 🚧 Stub |
+| Agentic RAG | `patterns/agentic_rag/` | Research & Lookup | ⭐⭐ Medium | Fact-heavy queries | 🚧 Stub |
+| System 2 | `patterns/system2/` | Hard Logic | ⭐⭐⭐ Medium | Math/reasoning | 🚧 Stub |
 
 ## Core Module Descriptions
 
@@ -154,6 +177,9 @@ llm = create_llm_client(provider="openai", model="gpt-4")
 # Or local Ollama
 llm = create_llm_client(provider="ollama", model="mistral:7b")
 
+# Or Anthropic
+llm = create_llm_client(provider="anthropic", model="claude-3-5-sonnet-20241022")
+
 # Call the same way regardless
 response = llm.generate(system="You are helpful", user="Hello")
 ```
@@ -165,7 +191,7 @@ Your aistack-mcp integration point:
 ```python
 from patterns.core import get_mcp_toolkit
 
-tools = get_mcp_toolkit()
+tools = get_mcp_toolkit()  # Returns your aistack-mcp client
 
 # Use in any pattern
 result = tools.call("file_read", path="/path/to/file")
@@ -204,28 +230,32 @@ langgraph = ["langgraph>=0.2.0", "langchain>=0.1.0"]
 dev = ["pytest>=7.4.0", "black>=23.0.0", "ruff>=0.1.0"]
 ```
 
-## Learning Path
+## Learning Path (Recommended)
 
-**Week 1: Foundation**
+### Week 1: Foundation (IEV Mastery)
 - Read `docs/PATTERNS_OVERVIEW.md`
 - Run `python -m patterns.patterns.iev.example`
 - Modify the verification prompt
-- Add your own tool call
-
-**Week 2: Deepen IEV**
-- Understand the state transitions
+- Add your own validation rule
 - Write a test in `tests/test_iev.py`
-- Build a custom scenario (e.g., "Verify before trading")
 
-**Week 3: Layer Evaluator-Optimizer**
-- Run examples/code_review.py
+### Week 2: IEV in Production
+- Build a custom scenario (e.g., "Verify before trading")
+- Understand state transitions and error handling
+- Experiment with different LLM providers
+- Learn when to use different validation strategies
+
+### Week 3: Layer Evaluator-Optimizer
+- Run `examples/code_review.py`
 - Understand the critique loop
 - Experiment with grading criteria
+- Combine with IEV for enhanced workflows
 
-**Week 4+: Combine Patterns**
+### Week 4+: Advanced Patterns
 - Use Orchestrator to delegate tasks
 - Integrate Agentic RAG for research
 - Implement System 2 for logic puzzles
+- Build hybrid patterns (e.g., IEV → Evaluator-Optimizer → Action)
 
 ## Running Locally
 
@@ -295,8 +325,9 @@ PROVIDER=openai python -m patterns.patterns.iev.example
 3. Read the IEV explanation in `docs/PATTERNS_OVERVIEW.md` (20 min)
 4. Modify the prompt in `patterns/iev/prompts.py` (10 min)
 5. Write a test for your scenario (15 min)
+6. Move to Evaluator-Optimizer when ready
 
-Once you've mastered IEV, move to Evaluator-Optimizer (same process).
+Once you've mastered IEV, the others follow naturally—they're all variations on the same feedback loop.
 
 ## Contributing & Extending
 
@@ -317,4 +348,8 @@ MIT
 - GitHub Issues: For bugs and feature requests
 - Documentation: Check `docs/` for detailed explanations
 
+---
+
 **Start with IEV. Master it. Then layer on the others.**
+
+*Last updated: December 2025*
