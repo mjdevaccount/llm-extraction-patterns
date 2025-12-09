@@ -114,10 +114,19 @@ def create_iev_graph(
         start_time = time.time()
         try:
             prompt = intelligence_prompt.format(input=state["input"])
-            analysis = await llm_client.generate(
-                system="You are a helpful assistant that analyzes information.",
-                user=prompt,
-            )
+            # LLMClient.generate() is sync, wrap in async; LangChain has ainvoke()
+            import asyncio
+            if hasattr(llm_client, 'generate'):
+                analysis = await asyncio.to_thread(
+                    llm_client.generate,
+                    system="You are a helpful assistant that analyzes information.",
+                    user=prompt,
+                )
+            else:
+                # LangChain ChatModel
+                from langchain_core.messages import HumanMessage
+                response = await llm_client.ainvoke([HumanMessage(content=prompt)])
+                analysis = response.content if hasattr(response, 'content') else str(response)
             duration = (time.time() - start_time) * 1000
             metrics.record("intelligence", duration, "success")
             return {"analysis": analysis}
@@ -142,10 +151,19 @@ def create_iev_graph(
             schema_json = output_schema.model_json_schema()
             prompt += f"\n\nExtract data matching this schema (return valid JSON only):\n{json.dumps(schema_json, indent=2)}"
 
-            response_text = await llm_client.generate(
-                system="You are a helpful assistant that extracts structured data.",
-                user=prompt,
-            )
+            # LLMClient.generate() is sync, wrap in async; LangChain has ainvoke()
+            import asyncio
+            if hasattr(llm_client, 'generate'):
+                response_text = await asyncio.to_thread(
+                    llm_client.generate,
+                    system="You are a helpful assistant that extracts structured data.",
+                    user=prompt,
+                )
+            else:
+                # LangChain ChatModel
+                from langchain_core.messages import HumanMessage
+                response = await llm_client.ainvoke([HumanMessage(content=prompt)])
+                response_text = response.content if hasattr(response, 'content') else str(response)
 
             # Extract and repair JSON
             json_text = _extract_json(response_text)
@@ -230,10 +248,19 @@ def create_iev_graph(
             prompt = verification_prompt.format(
                 extracted=json.dumps(extracted_dict, indent=2, default=str)
             )
-            verification_result = await llm_client.generate(
-                system="You are a helpful assistant that verifies data quality and safety.",
-                user=prompt,
-            )
+            # LLMClient.generate() is sync, wrap in async; LangChain has ainvoke()
+            import asyncio
+            if hasattr(llm_client, 'generate'):
+                verification_result = await asyncio.to_thread(
+                    llm_client.generate,
+                    system="You are a helpful assistant that verifies data quality and safety.",
+                    user=prompt,
+                )
+            else:
+                # LangChain ChatModel
+                from langchain_core.messages import HumanMessage
+                response = await llm_client.ainvoke([HumanMessage(content=prompt)])
+                verification_result = response.content if hasattr(response, 'content') else str(response)
             verification_result = verification_result.upper()
 
             if "APPROVED" in verification_result:
@@ -274,7 +301,7 @@ def create_iev_graph(
     
     # Wrap to add metrics
     async def invoke_with_metrics(input_text: str) -> Dict[str, Any]:
-        result = compiled_graph.invoke({"input": input_text})
+        result = await compiled_graph.ainvoke({"input": input_text})
         result["metrics"] = metrics.get_summary()
         return result
     

@@ -45,10 +45,9 @@ class StrictValidationStrategy(IValidationStrategy):
                 "outcome": "strict_pass",
             }
         except ValidationError as e:
-            raise ValidationError(
-                f"Strict validation failed: {e}",
-                model=schema
-            )
+            # Re-raise with better message
+            error_msg = f"Strict validation failed: {e}"
+            raise ValueError(error_msg) from e
 
 
 class RetryValidationStrategy(IValidationStrategy):
@@ -90,10 +89,9 @@ class RetryValidationStrategy(IValidationStrategy):
                     # Try LLM repair
                     data = await self._repair_with_llm(data, e, schema, llm)
         
-        raise ValidationError(
-            f"Validation failed after {max_retries} retries: {last_error}",
-            model=schema
-        )
+        # Re-raise with better message
+        error_msg = f"Validation failed after {max_retries} retries: {last_error}"
+        raise ValueError(error_msg) from last_error
     
     async def _repair_with_llm(
         self,
@@ -178,10 +176,9 @@ class BestEffortValidationStrategy(IValidationStrategy):
                     data, new_repairs = self._repair_fields_safe(data, e, schema)
                     repairs.update(new_repairs)
                 else:
-                    raise ValidationError(
-                        f"Validation failed after best-effort repair: {e}",
-                        model=schema
-                    )
+                    # Re-raise with better message
+                    error_msg = f"Validation failed after best-effort repair: {e}"
+                    raise ValueError(error_msg) from e
         
         return {
             "validated": data,

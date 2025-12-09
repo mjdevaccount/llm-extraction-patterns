@@ -10,7 +10,7 @@ from datetime import datetime
 from langchain_core.messages import HumanMessage
 
 from .base_node import BaseNode, NodeExecutionError, NodeStatus
-from ..llm_adapter import invoke_llm
+from .llm_adapter import invoke_llm
 
 logger = logging.getLogger(__name__)
 
