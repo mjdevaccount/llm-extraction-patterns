@@ -2,7 +2,7 @@
 
 import pytest
 from pydantic import BaseModel, Field
-from patterns.patterns.iev.strategies import (
+from patterns.core.extraction_strategies import (
     IncrementalRepairStrategy,
     LLMRepairStrategy,
     RegexRepairStrategy,
@@ -10,7 +10,7 @@ from patterns.patterns.iev.strategies import (
     RetryValidationStrategy,
     BestEffortValidationStrategy,
 )
-from patterns.patterns.iev.abstractions import ILLMProvider
+from patterns.core.abstractions import ILLMProvider
 
 
 # ============================================================================

@@ -35,7 +35,14 @@ except ImportError:
     # Fallback to OllamaClient
     from patterns.core.llm_client import OllamaClient
 
-from patterns.patterns.two_model import TwoModelExtractionNode, NuExtractFormatter
+from patterns.patterns.two_model import TwoModelExtractionNode
+from patterns.core.extractor_formatters import NuExtractFormatter
+from patterns.core.llm_factory import (
+    get_reasoning_llm,
+    get_extractor_llm,
+    get_extractor_llm_from_formatter,
+)
+from patterns.core.json_repair import repair_json, extract_json_object
 
 
 # ============================================================================
@@ -125,15 +132,7 @@ async def test_nuextract_mini_smoke():
     Tiny sanity test that should almost never fail and runs quick.
     If this breaks, NuExtract or the prompt contract changed.
     """
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    
-    nue = ChatOllama(
-        model="nuextract",
-        base_url=base_url,
-        temperature=0.0,
-        num_ctx=2048,
-        num_predict=500,
-    )
+    nue = get_extractor_llm(num_ctx=2048, num_predict=500)
     
     import json
     schema_str = json.dumps(MINI_SCHEMA, indent=2)
@@ -150,9 +149,14 @@ async def test_nuextract_mini_smoke():
     resp = await nue.ainvoke([HumanMessage(content=prompt)])
     raw = resp.content
     
-    start, end = raw.find("{"), raw.rfind("}")
-    assert start != -1 and end != -1, "No JSON object found"
-    data = json.loads(raw[start:end+1])
+    json_candidate = extract_json_object(raw)
+    assert json_candidate is not None, "No JSON object found"
+    
+    # Try to repair common JSON issues
+    data = repair_json(json_candidate)
+    if data is None:
+        # Fallback to direct parse
+        data = json.loads(json_candidate)
     
     assert data["product_name"]
     rating = float(data.get("rating_out_of_5", "0"))
@@ -167,23 +171,9 @@ async def test_raw_nuextract_roundtrip():
     Bare-bones test to verify nuextract + schema works without the node/formatter.
     This helps isolate whether the issue is in the models or the plumbing.
     """
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    
-    main_llm = ChatOllama(
-        model="qwen2.5:14b",
-        base_url=base_url,
-        temperature=0.7,
-        num_ctx=4096,
-        num_predict=2048,
-    )
-    
-    extractor_llm = ChatOllama(
-        model="nuextract",
-        base_url=base_url,
-        temperature=0.0,
-        num_ctx=4096,
-        num_predict=4000,
-    )
+    # Use factory to get LLMs
+    main_llm = get_reasoning_llm()
+    extractor_llm = get_extractor_llm()
     
     # 1) Main reasoning
     from langchain_core.messages import HumanMessage
@@ -210,12 +200,14 @@ async def test_raw_nuextract_roundtrip():
     
     # NuExtract with Ollama tends to return the JSON directly or prefixed with the template;
     # extract the first '{...}' block.
-    start = raw.find("{")
-    end = raw.rfind("}")
-    assert start != -1 and end != -1, "No JSON object found in nuextract output"
-    json_candidate = raw[start : end + 1]
+    json_candidate = extract_json_object(raw)
+    assert json_candidate is not None, "No JSON object found in nuextract output"
     
-    data = json.loads(json_candidate)
+    # Try to repair common JSON issues
+    data = repair_json(json_candidate)
+    if data is None:
+        # Fallback to direct parse
+        data = json.loads(json_candidate)
     
     assert "product_name" in data
     print(f"\n✓ Raw roundtrip successful! Product: {data.get('product_name')}")
@@ -235,56 +227,15 @@ async def test_two_model_product_review_extraction():
     - Derived values (ratings, scores)
     """
     
-    # Initialize Ollama clients
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    
-    if HAS_LANGCHAIN_OLLAMA:
-        # Use LangChain ChatOllama for better temperature control
-        # Main LLM: qwen2.5:14b (reasoning, high temperature)
-        main_llm = ChatOllama(
-            model="qwen2.5:14b",
-            base_url=base_url,
-            temperature=0.7,  # High temperature for reasoning
-            num_ctx=4096,  # Context window
-            num_predict=2048,  # Max tokens to generate
-        )
-        
-        # Extractor LLM: Use nuextract model
-        extractor_llm = ChatOllama(
-            model="nuextract",  # Use actual Ollama model name
-            base_url=base_url,
-            temperature=0.0,  # Low temperature for deterministic extraction
-            num_ctx=4096,  # Context window
-            num_predict=4000,  # Higher max tokens for complex schemas
-        )
-    else:
-        # Fallback to OllamaClient
-        from patterns.core.llm_client import OllamaClient
-        main_llm = OllamaClient(
-            model="qwen2.5:14b",
-            base_url=base_url
-        )
-        extractor_llm = OllamaClient(
-            model="nuextract",  # Use actual Ollama model name
-            base_url=base_url
-        )
+    # Use factory to get LLMs
+    main_llm = get_reasoning_llm()
     
     # Create formatter - NuExtract protocol
     formatter = NuExtractFormatter()
     print("Using NuExtractFormatter")
     
-    # Use formatter config hints for extractor LLM
-    extractor_config = formatter.get_extractor_config()
-    
-    # Recreate extractor with formatter's recommended config
-    if HAS_LANGCHAIN_OLLAMA:
-        extractor_llm = ChatOllama(
-            model="nuextract",
-            base_url=base_url,
-            temperature=extractor_config.get("temperature", 0.0),
-            num_ctx=4096,
-            num_predict=extractor_config.get("num_predict", 4000),
-        )
+    # Get extractor LLM with formatter's recommended config
+    extractor_llm = get_extractor_llm_from_formatter(formatter)
     
     # Create two-model extraction node (strict=True for tests)
     from patterns.patterns.two_model import TwoModelExtractionNode
