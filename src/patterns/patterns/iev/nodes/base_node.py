@@ -53,6 +53,7 @@ class NodeMetrics:
     output_keys: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
     warnings: List[str] = field(default_factory=list)
+    extra: Dict[str, Any] = field(default_factory=dict)  # Additional metrics
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -63,6 +64,7 @@ class NodeMetrics:
             "output_keys": self.output_keys,
             "error_message": self.error_message,
             "warnings": self.warnings,
+            "extra": self.extra,
         }
 
 
